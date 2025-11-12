@@ -495,6 +495,10 @@ if st.button("🚀 開始訓練", type="primary", use_container_width=True):
                 st.error("❌ 資料中缺失值過多，無法進行訓練。")
                 st.stop()
             
+            # 保存原始資料（用於重複隨機分割評估）
+            X_original = X.copy()
+            y_original = y.copy()
+            
             # 資料分割（如果需要）
             X_train = X
             y_train = y
@@ -641,6 +645,9 @@ if st.button("🚀 開始訓練", type="primary", use_container_width=True):
             st.session_state['test_X'] = X_test
             st.session_state['test_y'] = y_test
             st.session_state['split_data'] = split_data
+            # 保存原始資料（未擴增、未分割），用於重複隨機分割評估
+            st.session_state['X_original'] = X_original
+            st.session_state['y_original'] = y_original
             
             st.success("✅ 模型訓練完成！")
             
@@ -1058,21 +1065,30 @@ if 'trained_model' in st.session_state and st.session_state['trained_model'] is 
                 
                 try:
                     # 使用原始資料（未擴增、未分割）進行評估
-                    # 注意：這裡需要使用原始 X 和 y，而不是擴增後的
-                    # 如果 X 和 y 不在作用域內，使用 X_train + X_test 和 y_train + y_test 合併
-                    if 'X' not in locals() or 'y' not in locals():
-                        # 如果 X 和 y 不在作用域內，從訓練集和測試集合併
+                    # 注意：重複隨機分割評估需要使用完全原始的資料，這樣每次重複時才能正確應用擴增參數
+                    # 優先使用 session_state 中保存的原始資料
+                    if 'X_original' in st.session_state and 'y_original' in st.session_state:
+                        X_eval = st.session_state['X_original'].copy()
+                        y_eval = st.session_state['y_original'].copy()
+                    elif 'X_original' in locals() and 'y_original' in locals():
+                        X_eval = X_original.copy()
+                        y_eval = y_original.copy()
+                    elif 'X' in locals() and 'y' in locals():
+                        # 如果沒有保存原始資料，使用 X 和 y（應該是未擴增的）
+                        X_eval = X.copy()
+                        y_eval = y.copy()
+                    else:
+                        # 最後的備選方案：從訓練集和測試集合併（但這可能包含擴增後的資料）
+                        # ⚠️ 警告：如果走到這裡，表示原始資料未正確保存，可能會導致測試集被擴增
+                        st.warning("⚠️ 警告：無法取得原始資料，使用備選方案可能會導致測試集被擴增。")
                         if X_test is not None and y_test is not None:
+                            # 如果已經進行了擴增，這裡會包含擴增後的資料，這不是我們想要的
+                            # 但作為備選方案，我們只能這樣做
                             X_eval = pd.concat([X_train, X_test], ignore_index=True)
                             y_eval = pd.concat([y_train, y_test], ignore_index=True)
                         else:
-                            # 如果沒有測試集，使用訓練集
                             X_eval = X_train.copy()
                             y_eval = y_train.copy()
-                    else:
-                        # 使用原始 X 和 y
-                        X_eval = X.copy()
-                        y_eval = y.copy()
                     
                     # 取得類別型特徵列表（如果存在）
                     categorical_features_for_eval = st.session_state.get('categorical_features', None)
@@ -1107,26 +1123,110 @@ if 'trained_model' in st.session_state and st.session_state['trained_model'] is 
                     # 顯示評估結果（平均值 ± 標準差）
                     st.success(f"✅ 重複隨機分割評估完成（{n_repeats} 次）")
                     
+                    # 顯示使用的參數資訊（幫助用戶確認參數已更新）
+                    param_info = []
+                    param_info.append(f"🔄 **重複次數**：{n_repeats} 次")
+                    param_info.append(f"📊 **測試集比例**：{test_size:.1%}")
+                    
+                    if aug_params:
+                        noise_type_display = "高斯噪聲" if aug_params['noise_type'] == 'gaussian' else "均勻噪聲"
+                        param_info.append(f"📈 **資料擴增**：{noise_type_display}，強度 {aug_params['noise_strength']:.3f}，倍數 {aug_params['multiplier']}x")
+                    else:
+                        param_info.append(f"📈 **資料擴增**：未啟用")
+                    
+                    if algorithm == "線性回歸":
+                        if model_params.get('regularization'):
+                            reg_display = "L1 (Lasso)" if model_params['regularization'] == 'l1' else "L2 (Ridge)"
+                            param_info.append(f"📌 **正則化**：{reg_display}，alpha = {model_params.get('alpha', 1.0):.3f}")
+                        else:
+                            param_info.append(f"📌 **正則化**：無正則化")
+                    else:  # 梯度下降
+                        param_info.append(f"⚙️ **損失函數**：{model_params.get('loss', 'MSE')}")
+                        param_info.append(f"⚙️ **學習率**：{model_params.get('learning_rate', 0.01):.4f}")
+                        param_info.append(f"⚙️ **最大迭代**：{model_params.get('max_iter', 1000)}")
+                        param_info.append(f"⚙️ **收斂容忍度**：{model_params.get('tol', 1e-6):.2e}")
+                        param_info.append(f"⚙️ **資料標準化**：{'是' if model_params.get('use_scaling', False) else '否'}")
+                    
+                    if categorical_features_for_eval:
+                        param_info.append(f"🏷️ **類別型特徵**：{len(categorical_features_for_eval)} 個")
+                    
+                    st.info("**使用的參數設定：**\n\n" + "\n".join(param_info))
+                    
                     # 格式化並顯示結果
                     results_df = format_metrics_with_std(mean_metrics, std_metrics)
                     st.dataframe(results_df, use_container_width=True)
                     
                     # 顯示 R² 比較
-                    from sklearn.metrics import r2_score
-                    train_r2 = r2_score(y_train, y_train_pred)
+                    # 計算訓練集 R² 的平均值（從所有重複評估結果中）
+                    train_r2_mean = np.mean([r['訓練集 R²'] for r in all_results])
+                    train_r2_std = np.std([r['訓練集 R²'] for r in all_results])
                     test_r2_mean = mean_metrics['R²']
                     test_r2_std = std_metrics['R²']
                     
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.metric("訓練集 R²", f"{train_r2:.4f}")
+                        st.metric("訓練集 R²（平均值 ± 標準差）", f"{train_r2_mean:.4f} ± {train_r2_std:.4f}")
                     with col2:
                         st.metric("測試集 R²（平均值 ± 標準差）", f"{test_r2_mean:.4f} ± {test_r2_std:.4f}")
+                    
+                    # 顯示測試集資料和下載功能
+                    st.markdown("---")
+                    st.markdown("#### 📥 測試集資料")
+                    
+                    # 選擇要查看的測試集（預設顯示最後一次）
+                    test_set_options = [f"第 {i+1} 次評估（隨機種子：{r['隨機種子']}）" for i, r in enumerate(all_results)]
+                    selected_test_idx = st.selectbox(
+                        "選擇要查看的測試集",
+                        options=list(range(n_repeats)),
+                        format_func=lambda x: test_set_options[x],
+                        index=n_repeats - 1,  # 預設選擇最後一次
+                        help="選擇要查看和下載的測試集資料"
+                    )
+                    
+                    selected_result = all_results[selected_test_idx]
+                    X_test_selected = selected_result['X_test']
+                    y_test_selected = selected_result['y_test']
+                    y_test_pred_selected = selected_result['y_test_pred']
+                    
+                    # 合併測試集資料（特徵 + 真實值 + 預測值）
+                    test_data_complete = X_test_selected.copy()
+                    # 添加真實值（加上前綴以便區分）
+                    for col in y_test_selected.columns:
+                        test_data_complete[f'真實值_{col}'] = y_test_selected[col].values
+                    # 添加預測值（加上前綴以便區分）
+                    for col in y_test_pred_selected.columns:
+                        test_data_complete[f'預測值_{col}'] = y_test_pred_selected[col].values
+                    # 添加誤差（真實值 - 預測值）
+                    for col in y_test_selected.columns:
+                        if col in y_test_pred_selected.columns:
+                            test_data_complete[f'誤差_{col}'] = (y_test_selected[col].values - y_test_pred_selected[col].values)
+                    
+                    # 顯示測試集資料預覽
+                    st.markdown(f"**測試集資料預覽（第 {selected_test_idx + 1} 次評估，共 {len(test_data_complete)} 筆）：**")
+                    st.dataframe(test_data_complete.head(100), use_container_width=True)  # 顯示前 100 筆
+                    
+                    if len(test_data_complete) > 100:
+                        st.info(f"💡 僅顯示前 100 筆，完整資料共 {len(test_data_complete)} 筆，可下載查看全部資料。")
+                    
+                    # 下載按鈕
+                    csv_data = test_data_complete.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        label=f"📥 下載測試集資料（第 {selected_test_idx + 1} 次評估）",
+                        data=csv_data,
+                        file_name=f"測試集_第{selected_test_idx + 1}次評估_隨機種子{selected_result['隨機種子']}.csv",
+                        mime="text/csv",
+                        help="下載包含特徵、真實值、預測值和誤差的完整測試集資料"
+                    )
                     
                     # 顯示所有評估結果（預設摺疊）
                     with st.expander(f"📋 查看所有評估結果（{n_repeats} 次評估的詳細記錄）", expanded=False):
                         st.markdown("**每次評估的詳細結果：**")
-                        detailed_df = pd.DataFrame(all_results)
+                        # 創建不包含 DataFrame 的結果用於顯示
+                        display_results = []
+                        for r in all_results:
+                            display_r = {k: v for k, v in r.items() if k not in ['X_test', 'y_test', 'y_test_pred']}
+                            display_results.append(display_r)
+                        detailed_df = pd.DataFrame(display_results)
                         # 格式化數值顯示
                         for col in detailed_df.columns:
                             if col not in ['重複次數', '隨機種子', '訓練集樣本數', '測試集樣本數']:
@@ -1177,7 +1277,7 @@ if 'trained_model' in st.session_state and st.session_state['trained_model'] is 
                         st.dataframe(summary_df, use_container_width=True)
                     
                     # 如果測試集 R² 明顯低於訓練集 R²，提示可能過擬合
-                    if test_r2_mean < train_r2 - 0.1:
+                    if test_r2_mean < train_r2_mean - 0.1:
                         st.warning("⚠️ 測試集 R² 明顯低於訓練集 R²，可能存在過擬合（Overfitting）問題。建議：減少特徵數量、增加訓練資料、或使用正則化。")
                 
                 except Exception as e:

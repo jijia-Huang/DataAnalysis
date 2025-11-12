@@ -106,7 +106,6 @@ def repeated_random_split_evaluate(
         # 資料擴增（如果啟用）
         if augmentation_params is not None:
             from utils.data_augmenter import augment_dataframe
-            import numpy as np
             
             # 保存擴增前的資料
             X_train_before = X_train.copy()
@@ -169,7 +168,10 @@ def repeated_random_split_evaluate(
             '訓練集 MSE': train_metrics['MSE'],
             '測試集 MSE': test_metrics['MSE'],
             '訓練集 MAE': train_metrics['MAE'],
-            '測試集 MAE': test_metrics['MAE']
+            '測試集 MAE': test_metrics['MAE'],
+            'X_test': X_test.copy(),  # 保存測試集特徵
+            'y_test': y_test.copy(),  # 保存測試集目標變數
+            'y_test_pred': y_test_pred.copy()  # 保存測試集預測結果
         }
         all_results.append(result)
         
