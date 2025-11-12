@@ -255,6 +255,55 @@ st.markdown("---")
 # ========== 步驟 6: 參數設定 ==========
 st.markdown("### 步驟 6: 設定訓練參數")
 
+# 初始化正則化變數（確保在所有情況下都有定義）
+regularization_type = "無正則化"
+alpha = 1.0
+
+# 線性回歸的正則化選項
+if algorithm == "線性回歸":
+    regularization_type = st.radio(
+        "正則化類型",
+        options=["無正則化", "L1 (Lasso)", "L2 (Ridge)"],
+        help="正則化可以幫助防止過擬合，提高模型的泛化能力"
+    )
+    
+    # 正則化強度設定（僅在選擇 L1 或 L2 時顯示）
+    if regularization_type != "無正則化":
+        alpha = st.slider(
+            "正則化強度 (alpha)",
+            min_value=0.001,
+            max_value=100.0,
+            value=1.0,
+            step=0.1,
+            format="%.3f",
+            help="alpha 值越大，正則化效果越強。建議從 1.0 開始嘗試。"
+        )
+    
+    # 可展開/收起的正則化說明
+    with st.expander("📖 正則化說明（點擊展開）"):
+        st.markdown("""
+        **什麼是正則化？**
+        
+        正則化是一種防止模型過擬合的技術。當模型過於複雜時，可能會過度學習訓練資料的細節，導致在新資料上表現不佳。正則化通過添加懲罰項來控制模型的複雜度。
+        
+        **L1 正則化 (Lasso)**
+        - **作用**：會將某些特徵的係數縮減為 0，實現特徵選擇
+        - **特點**：適合當您認為只有部分特徵重要時使用
+        - **效果**：可以自動排除不重要的特徵，簡化模型
+        
+        **L2 正則化 (Ridge)**
+        - **作用**：會縮小所有特徵的係數，但不會完全消除
+        - **特點**：適合當您認為所有特徵都有一定重要性時使用
+        - **效果**：讓模型參數更平滑，減少極端值
+        
+        **如何選擇？**
+        - **選擇 L1**：當您想要自動選擇重要特徵，或特徵數量很多時
+        - **選擇 L2**：當您想要保留所有特徵，但希望模型更穩定時
+        - **無正則化**：當資料量足夠大，或不需要控制過擬合時
+        """)
+    
+    st.markdown("---")
+
 if algorithm == "線性回歸梯度下降":
     col1, col2 = st.columns(2)
     
@@ -533,7 +582,17 @@ if st.button("🚀 開始訓練", type="primary", use_container_width=True):
                 categorical_features = [f for f in categorical_features if f in X_train.columns]
             
             if algorithm == "線性回歸":
-                model = LinearRegressionModel()
+                # 根據選擇的正則化類型設定參數
+                regularization = None
+                if regularization_type == "L1 (Lasso)":
+                    regularization = 'l1'
+                elif regularization_type == "L2 (Ridge)":
+                    regularization = 'l2'
+                
+                model = LinearRegressionModel(
+                    regularization=regularization,
+                    alpha=alpha if regularization else 1.0
+                )
                 model.fit(X_train, y_train, categorical_features=categorical_features)
                 
                 # 顯示預處理資訊
@@ -605,7 +664,7 @@ if 'trained_model' in st.session_state and st.session_state['trained_model'] is 
     model_info = model.get_info()
     
     # 顯示模型基本資訊
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("模型類型", model_info['model_name'])
     with col2:
@@ -617,6 +676,23 @@ if 'trained_model' in st.session_state and st.session_state['trained_model'] is 
             st.metric("資料分割", "是")
         else:
             st.metric("資料分割", "否")
+    with col5:
+        # 顯示正則化資訊（僅線性回歸）
+        if isinstance(model, LinearRegressionModel) and model_info.get('regularization'):
+            reg_type = model_info['regularization']
+            if reg_type == 'l1':
+                reg_display = "L1 (Lasso)"
+            elif reg_type == 'l2':
+                reg_display = "L2 (Ridge)"
+            else:
+                reg_display = "無"
+            st.metric("正則化", reg_display)
+        else:
+            st.metric("正則化", "無")
+    
+    # 顯示正則化強度（如果有）
+    if isinstance(model, LinearRegressionModel) and model_info.get('regularization') and model_info.get('alpha'):
+        st.info(f"📌 **正則化設定**：{model_info['regularization'].upper()} 正則化，強度 alpha = {model_info['alpha']:.3f}")
     
     # 損失曲線（僅梯度下降）
     if isinstance(model, GradientDescentModel) and model.training_history:
@@ -950,6 +1026,17 @@ if 'trained_model' in st.session_state and st.session_state['trained_model'] is 
             model_params = {}
             if algorithm == "線性回歸":
                 model_class = LinearRegressionModel
+                # 添加正則化參數（如果有的話）
+                regularization = None
+                if regularization_type == "L1 (Lasso)":
+                    regularization = 'l1'
+                elif regularization_type == "L2 (Ridge)":
+                    regularization = 'l2'
+                if regularization:
+                    model_params = {
+                        'regularization': regularization,
+                        'alpha': alpha
+                    }
             else:  # 梯度下降
                 model_class = GradientDescentModel
                 model_params = {
@@ -970,17 +1057,48 @@ if 'trained_model' in st.session_state and st.session_state['trained_model'] is 
                     status_text.text(f"進度：{current}/{total} 次評估完成")
                 
                 try:
-                    # 使用原始資料（未擴增）進行評估
+                    # 使用原始資料（未擴增、未分割）進行評估
                     # 注意：這裡需要使用原始 X 和 y，而不是擴增後的
+                    # 如果 X 和 y 不在作用域內，使用 X_train + X_test 和 y_train + y_test 合併
+                    if 'X' not in locals() or 'y' not in locals():
+                        # 如果 X 和 y 不在作用域內，從訓練集和測試集合併
+                        if X_test is not None and y_test is not None:
+                            X_eval = pd.concat([X_train, X_test], ignore_index=True)
+                            y_eval = pd.concat([y_train, y_test], ignore_index=True)
+                        else:
+                            # 如果沒有測試集，使用訓練集
+                            X_eval = X_train.copy()
+                            y_eval = y_train.copy()
+                    else:
+                        # 使用原始 X 和 y
+                        X_eval = X.copy()
+                        y_eval = y.copy()
+                    
+                    # 取得類別型特徵列表（如果存在）
+                    categorical_features_for_eval = st.session_state.get('categorical_features', None)
+                    if categorical_features_for_eval:
+                        categorical_features_for_eval = [f for f in categorical_features_for_eval if f in X_eval.columns]
+                    
+                    # 準備擴增參數（如果啟用擴增）
+                    aug_params = None
+                    if enable_augmentation:
+                        aug_params = {
+                            'noise_type': augmentation_params['noise_type'],
+                            'noise_strength': augmentation_params['noise_strength'],
+                            'multiplier': augmentation_params['multiplier']
+                        }
+                    
                     mean_metrics, std_metrics, all_results = repeated_random_split_evaluate(
                         model_class,
                         model_params,
-                        X,  # 使用原始資料
-                        y,  # 使用原始資料
+                        X_eval,  # 使用原始資料
+                        y_eval,  # 使用原始資料
                         test_size=test_size,
                         n_repeats=n_repeats,
                         base_random_state=42,
-                        progress_callback=progress_callback
+                        progress_callback=progress_callback,
+                        categorical_features=categorical_features_for_eval,
+                        augmentation_params=aug_params  # 傳遞擴增參數
                     )
                     
                     progress_bar.empty()

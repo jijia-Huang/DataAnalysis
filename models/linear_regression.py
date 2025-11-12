@@ -1,12 +1,12 @@
 """
 線性回歸模型
 
-使用 Scikit-learn 的 LinearRegression 實作。
+使用 Scikit-learn 的 LinearRegression 實作，支援正則化（L1/L2）。
 """
 
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Lasso, Ridge
 from sklearn.multioutput import MultiOutputRegressor
 import joblib
 from typing import Any, Dict, Optional, List
@@ -20,14 +20,25 @@ class LinearRegressionModel(BaseModel):
     線性回歸模型
     
     使用 Scikit-learn 的 LinearRegression，支援單一和多個目標變數。
+    支援正則化選項：無正則化、L1 (Lasso)、L2 (Ridge)。
     """
     
-    def __init__(self):
-        """初始化線性回歸模型"""
+    def __init__(self, regularization: Optional[str] = None, alpha: float = 1.0):
+        """
+        初始化線性回歸模型
+        
+        Args:
+            regularization: 正則化類型，可選值：None（無正則化）、'l1'（Lasso）、'l2'（Ridge）
+            alpha: 正則化強度，預設為 1.0
+        """
         super().__init__("Linear Regression")
         self.model: Optional[LinearRegression] = None
         self.multi_output_model: Optional[MultiOutputRegressor] = None
         self.is_multi_output = False
+        
+        # 正則化參數
+        self.regularization = regularization  # None, 'l1', 'l2'
+        self.alpha = alpha
         
         # 類別型特徵編碼器（線性回歸也需要處理類別型特徵）
         self.encoder = None
@@ -64,15 +75,22 @@ class LinearRegressionModel(BaseModel):
         # 判斷是否為多輸出迴歸
         self.is_multi_output = y.shape[1] > 1
         
+        # 根據正則化類型選擇基礎模型
+        if self.regularization == 'l1':
+            base_model = Lasso(alpha=self.alpha)
+        elif self.regularization == 'l2':
+            base_model = Ridge(alpha=self.alpha)
+        else:
+            base_model = LinearRegression()
+        
         if self.is_multi_output:
             # 多輸出迴歸：使用 MultiOutputRegressor
-            base_model = LinearRegression()
             self.multi_output_model = MultiOutputRegressor(base_model)
             self.multi_output_model.fit(X_processed.values, y.values)
             self.model = None
         else:
             # 單一輸出迴歸
-            self.model = LinearRegression()
+            self.model = base_model
             self.model.fit(X_processed.values, y.values.ravel())
             self.multi_output_model = None
         
@@ -130,7 +148,9 @@ class LinearRegressionModel(BaseModel):
             'preprocessing_metadata': self.preprocessing_metadata,  # 保存預處理元資料
             'feature_names': self.feature_names,
             'target_names': self.target_names,
-            'model_name': self.model_name
+            'model_name': self.model_name,
+            'regularization': self.regularization,  # 保存正則化類型
+            'alpha': self.alpha  # 保存正則化強度
         }
         
         joblib.dump(model_data, path)
@@ -155,6 +175,9 @@ class LinearRegressionModel(BaseModel):
         self.feature_names = model_data['feature_names']
         self.target_names = model_data['target_names']
         self.model_name = model_data['model_name']
+        # 載入正則化參數（向後相容：舊模型可能沒有這些欄位）
+        self.regularization = model_data.get('regularization', None)  # 載入正則化類型
+        self.alpha = model_data.get('alpha', 1.0)  # 載入正則化強度
         self.is_trained = True
         
         return self
@@ -171,7 +194,9 @@ class LinearRegressionModel(BaseModel):
             'is_trained': self.is_trained,
             'is_multi_output': self.is_multi_output,
             'feature_names': self.feature_names,
-            'target_names': self.target_names
+            'target_names': self.target_names,
+            'regularization': self.regularization,  # 正則化類型
+            'alpha': self.alpha if self.regularization else None  # 正則化強度（僅在有正則化時顯示）
         }
         
         # 加入特徵類型資訊（類別特徵和數值特徵）

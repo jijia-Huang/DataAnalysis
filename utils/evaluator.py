@@ -63,7 +63,9 @@ def repeated_random_split_evaluate(
     test_size: float = 0.2,
     n_repeats: int = 5,
     base_random_state: int = 42,
-    progress_callback: Optional[callable] = None
+    progress_callback: Optional[callable] = None,
+    categorical_features: Optional[List[str]] = None,
+    augmentation_params: Optional[Dict[str, Any]] = None
 ) -> Tuple[Dict[str, float], Dict[str, float], List[Dict[str, float]]]:
     """
     執行重複隨機分割評估
@@ -101,9 +103,52 @@ def repeated_random_split_evaluate(
             shuffle=True
         )
         
+        # 資料擴增（如果啟用）
+        if augmentation_params is not None:
+            from utils.data_augmenter import augment_dataframe
+            import numpy as np
+            
+            # 保存擴增前的資料
+            X_train_before = X_train.copy()
+            y_train_before = y_train.copy()
+            
+            # 擴增特徵資料
+            X_train = augment_dataframe(
+                X_train,
+                noise_type=augmentation_params['noise_type'],
+                noise_strength=augmentation_params['noise_strength'],
+                multiplier=augmentation_params['multiplier'],
+                random_state=random_state,  # 使用不同的隨機種子確保每次擴增不同
+                categorical_features=categorical_features
+            )
+            
+            # 擴增目標變數
+            if y_train.select_dtypes(include=[np.number]).shape[1] > 0:
+                # 如果目標變數是數值型，使用噪聲擴增
+                y_train = augment_dataframe(
+                    y_train_before,
+                    noise_type=augmentation_params['noise_type'],
+                    noise_strength=augmentation_params['noise_strength'],
+                    multiplier=augmentation_params['multiplier'],
+                    random_state=random_state
+                )
+            else:
+                # 如果目標變數不是數值型，則重複對應次數
+                y_train = pd.concat([y_train_before] * augmentation_params['multiplier'], ignore_index=True)
+            
+            # 確保 X_train 和 y_train 的行數一致
+            if len(X_train) != len(y_train):
+                min_len = min(len(X_train), len(y_train))
+                X_train = X_train.iloc[:min_len]
+                y_train = y_train.iloc[:min_len]
+        
         # 創建並訓練模型
         model = model_class(**model_params)
-        model.fit(X_train, y_train)
+        # 傳遞 categorical_features 參數（如果有的話）
+        if categorical_features is not None:
+            model.fit(X_train, y_train, categorical_features=categorical_features)
+        else:
+            model.fit(X_train, y_train)
         
         # 預測
         y_test_pred = model.predict(X_test)
