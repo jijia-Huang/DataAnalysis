@@ -1,0 +1,38 @@
+{
+  "model_name": "Linear Regression",
+  "target_names": [
+    "日均押注"
+  ],
+  "feature_names": [
+    "Y 值",
+    "Z 值",
+    "金銀財寶",
+    "神話主角",
+    "中國主角",
+    "IP現金網",
+    "撲克牌",
+    "系列作初代"
+  ],
+  "original_columns": [
+    "Y 值",
+    "Z 值",
+    "金銀財寶",
+    "神話主角",
+    "中國主角",
+    "IP現金網",
+    "撲克牌",
+    "系列作初代"
+  ],
+  "categorical_features": [],
+  "numeric_features": [
+    "Y 值",
+    "Z 值",
+    "金銀財寶",
+    "神話主角",
+    "中國主角",
+    "IP現金網",
+    "撲克牌",
+    "系列作初代"
+  ],
+  "is_multi_output": false
+}
