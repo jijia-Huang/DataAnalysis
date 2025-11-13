@@ -206,24 +206,24 @@ if prediction_mode == "單筆資料預測":
         preprocessing_metadata = getattr(model, 'preprocessing_metadata', {})
         encoded_feature_names = preprocessing_metadata.get('encoded_feature_names', [])
         
-            if encoded_feature_names:
+        if encoded_feature_names:
             # 從 encoded_feature_names 建立映射（更可靠）
-                # encoded_feature_names 的順序與 encoder.categories_ 的順序一致
-                seen_features = {}
-                for enc_feat in encoded_feature_names:
-                    underscore_pos = enc_feat.find('_')
-                    if underscore_pos > 0:
-                        orig_feat = enc_feat[:underscore_pos]
+            # encoded_feature_names 的順序與 encoder.categories_ 的順序一致
+            seen_features = {}
+            for enc_feat in encoded_feature_names:
+                underscore_pos = enc_feat.find('_')
+                if underscore_pos > 0:
+                    orig_feat = enc_feat[:underscore_pos]
                     if orig_feat not in seen_features and orig_feat in categorical_features:
-                            # 這是該特徵的第一個編碼特徵，記錄索引
-                            seen_features[orig_feat] = len(seen_features)
+                        # 這是該特徵的第一個編碼特徵，記錄索引
+                        seen_features[orig_feat] = len(seen_features)
         
-        # 使用映射來取得類別值
+            # 使用映射來取得類別值
             for feature in categorical_features:
                 if feature in seen_features:
                     encoder_idx = seen_features[feature]
-                if encoder_idx < len(encoder.categories_):
-                    categories = encoder.categories_[encoder_idx]
+                    if encoder_idx < len(encoder.categories_):
+                        categories = encoder.categories_[encoder_idx]
                         valid_categories[feature] = [str(cat) for cat in categories]
         else:
             # 如果沒有 encoded_feature_names，嘗試順序匹配
