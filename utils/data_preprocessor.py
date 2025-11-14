@@ -197,7 +197,78 @@ def preprocess_features(
         else:
             if encoder is None:
                 raise ValueError("預測時必須提供 encoder")
-            encoded_data = encoder.transform(X[categorical_features])
+            
+            # 在預測時，確保類別特徵的類型與訓練時一致
+            # 這很重要，因為OneHotEncoder需要類型匹配才能正確編碼
+            X_categorical = X[categorical_features].copy()
+            for i, col in enumerate(categorical_features):
+                if i < len(encoder.categories_):
+                    categories = encoder.categories_[i]
+                    if len(categories) > 0:
+                        # 獲取訓練時的類別值類型和實際值
+                        sample_category = categories[0]
+                        category_type = type(sample_category)
+                        
+                        # 將輸入值轉換為與 categories_ 中值完全匹配的類型
+                        try:
+                            # 遍歷每一行進行轉換
+                            for idx in X_categorical.index:
+                                current_value = X_categorical.loc[idx, col]
+                                
+                                # 嘗試所有可能的轉換方式
+                                converted = False
+                                
+                                # 方法1：直接檢查是否在 categories_ 中（類型匹配）
+                                if current_value in categories:
+                                    # 值已經在 categories_ 中，但可能需要確保類型一致
+                                    if type(current_value) != category_type:
+                                        if category_type == int:
+                                            X_categorical.loc[idx, col] = int(current_value)
+                                        elif category_type == float:
+                                            X_categorical.loc[idx, col] = float(current_value)
+                                        else:
+                                            X_categorical.loc[idx, col] = str(current_value)
+                                    converted = True
+                                else:
+                                    # 方法2：嘗試轉換為與 categories_ 中值相同的類型
+                                    if category_type == int:
+                                        try:
+                                            converted_value = int(float(str(current_value)))
+                                            if converted_value in categories:
+                                                X_categorical.loc[idx, col] = converted_value
+                                                converted = True
+                                        except (ValueError, TypeError):
+                                            pass
+                                    elif category_type == float:
+                                        try:
+                                            converted_value = float(str(current_value))
+                                            if converted_value in categories:
+                                                X_categorical.loc[idx, col] = converted_value
+                                                converted = True
+                                        except (ValueError, TypeError):
+                                            pass
+                                    else:
+                                        try:
+                                            converted_value = str(current_value)
+                                            if converted_value in categories:
+                                                X_categorical.loc[idx, col] = converted_value
+                                                converted = True
+                                        except (ValueError, TypeError):
+                                            pass
+                                
+                                # 方法3：如果轉換失敗，嘗試直接匹配（不考慮類型）
+                                if not converted:
+                                    current_str = str(current_value)
+                                    for cat in categories:
+                                        if str(cat) == current_str:
+                                            X_categorical.loc[idx, col] = cat
+                                            converted = True
+                                            break
+                        except (ValueError, TypeError, KeyError) as e:
+                            # 如果轉換失敗，保持原樣
+                            pass
+            
+            encoded_data = encoder.transform(X_categorical)
         
         # 建立編碼後的欄位名稱
         encoded_feature_names = []

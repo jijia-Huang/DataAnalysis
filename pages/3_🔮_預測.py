@@ -443,6 +443,139 @@ if prediction_mode == "單筆資料預測":
             # 將輸入資料轉換為 DataFrame
             input_df = pd.DataFrame([input_data])
             
+            # 在驗證前，先進行類別特徵的類型轉換
+            # 這很重要，因為 selectbox 返回的是字符串，但 encoder 可能需要整數或其他類型
+            encoder = getattr(model, 'encoder', None)
+            preprocessing_metadata = getattr(model, 'preprocessing_metadata', {})
+            categorical_features = preprocessing_metadata.get('categorical_features', [])
+            
+            if encoder and hasattr(encoder, 'categories_') and categorical_features:
+                # 建立特徵名稱到索引的映射
+                encoded_feature_names = preprocessing_metadata.get('encoded_feature_names', [])
+                
+                if encoded_feature_names:
+                    # 從 encoded_feature_names 建立映射
+                    seen_features = {}
+                    for enc_feat in encoded_feature_names:
+                        underscore_pos = enc_feat.find('_')
+                        if underscore_pos > 0:
+                            orig_feat = enc_feat[:underscore_pos]
+                            if orig_feat not in seen_features and orig_feat in categorical_features:
+                                seen_features[orig_feat] = len(seen_features)
+                    
+                    # 轉換類別特徵的類型以匹配訓練時的類型
+                    for feature in categorical_features:
+                        if feature in input_df.columns and feature in seen_features:
+                            encoder_idx = seen_features[feature]
+                            if encoder_idx < len(encoder.categories_):
+                                categories = encoder.categories_[encoder_idx]
+                                if len(categories) > 0:
+                                    # 獲取訓練時的類別值類型
+                                    sample_category = categories[0]
+                                    category_type = type(sample_category)
+                                    
+                                    # 將輸入值轉換為與 categories_ 中值完全匹配的類型
+                                    try:
+                                        input_value = input_df[feature].iloc[0]
+                                        
+                                        # 嘗試所有可能的轉換方式
+                                        converted = False
+                                        
+                                        # 方法1：直接檢查是否在 categories_ 中（類型匹配）
+                                        if input_value in categories:
+                                            # 值已經在 categories_ 中，但可能需要確保類型一致
+                                            if type(input_value) != category_type:
+                                                if category_type == int:
+                                                    input_df.loc[0, feature] = int(input_value)
+                                                elif category_type == float:
+                                                    input_df.loc[0, feature] = float(input_value)
+                                                else:
+                                                    input_df.loc[0, feature] = str(input_value)
+                                            converted = True
+                                        else:
+                                            # 方法2：嘗試轉換為與 categories_ 中值相同的類型
+                                            if category_type == int:
+                                                try:
+                                                    converted_value = int(float(str(input_value)))
+                                                    if converted_value in categories:
+                                                        input_df.loc[0, feature] = converted_value
+                                                        converted = True
+                                                except (ValueError, TypeError):
+                                                    pass
+                                            elif category_type == float:
+                                                try:
+                                                    converted_value = float(str(input_value))
+                                                    if converted_value in categories:
+                                                        input_df.loc[0, feature] = converted_value
+                                                        converted = True
+                                                except (ValueError, TypeError):
+                                                    pass
+                                            else:
+                                                try:
+                                                    converted_value = str(input_value)
+                                                    if converted_value in categories:
+                                                        input_df.loc[0, feature] = converted_value
+                                                        converted = True
+                                                except (ValueError, TypeError):
+                                                    pass
+                                        
+                                        # 如果轉換失敗，嘗試直接匹配（不考慮類型）
+                                        if not converted:
+                                            # 嘗試將輸入值轉換為字符串，然後在 categories_ 中查找匹配的值
+                                            input_str = str(input_value)
+                                            for cat in categories:
+                                                if str(cat) == input_str:
+                                                    input_df.loc[0, feature] = cat
+                                                    converted = True
+                                                    break
+                                    except (ValueError, TypeError, KeyError) as e:
+                                        # 如果轉換失敗，保持原樣
+                                        pass
+                else:
+                    # 如果沒有 encoded_feature_names，嘗試順序匹配
+                    for i, feature in enumerate(categorical_features):
+                        if feature in input_df.columns and i < len(encoder.categories_):
+                            categories = encoder.categories_[i]
+                            if len(categories) > 0:
+                                sample_category = categories[0]
+                                category_type = type(sample_category)
+                                try:
+                                    input_value = input_df[feature].iloc[0]
+                                    
+                                    # 嘗試轉換
+                                    if input_value not in categories:
+                                        if category_type == int:
+                                            try:
+                                                converted_value = int(float(str(input_value)))
+                                                if converted_value in categories:
+                                                    input_df.loc[0, feature] = converted_value
+                                            except (ValueError, TypeError):
+                                                pass
+                                        elif category_type == float:
+                                            try:
+                                                converted_value = float(str(input_value))
+                                                if converted_value in categories:
+                                                    input_df.loc[0, feature] = converted_value
+                                            except (ValueError, TypeError):
+                                                pass
+                                        else:
+                                            try:
+                                                converted_value = str(input_value)
+                                                if converted_value in categories:
+                                                    input_df.loc[0, feature] = converted_value
+                                            except (ValueError, TypeError):
+                                                pass
+                                    else:
+                                        if type(input_value) != category_type:
+                                            if category_type == int:
+                                                input_df.loc[0, feature] = int(input_value)
+                                            elif category_type == float:
+                                                input_df.loc[0, feature] = float(input_value)
+                                            else:
+                                                input_df.loc[0, feature] = str(input_value)
+                                except (ValueError, TypeError):
+                                    pass
+            
             # 驗證輸入資料
             is_valid, error_msg, validation_info = validate_prediction_input(input_df, model)
             
