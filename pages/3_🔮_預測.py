@@ -14,6 +14,107 @@ from utils.model_manager import load_model, list_models, load_field_info
 from utils.data_loader import load_csv_file, validate_dataframe
 from utils.prediction_validator import validate_prediction_input
 from models.base_model import BaseModel
+from utils.data_preprocessor import preprocess_features
+
+
+def calculate_manual_prediction(model: BaseModel, input_df: pd.DataFrame, target_name: Optional[str] = None) -> Dict[str, Any]:
+    """
+    手動計算預測值（用於驗算）
+    
+    Args:
+        model: 訓練好的模型
+        input_df: 輸入資料（DataFrame）
+        target_name: 目標變數名稱（如果是多輸出模型）
+    
+    Returns:
+        dict: 包含驗算過程的字典
+    """
+    # 獲取模型資訊
+    model_info = model.get_info()
+    
+    # 檢查是否為線性回歸模型（只有線性回歸可以手動驗算）
+    if model_info.get('model_name') not in ['Linear Regression', 'Gradient Descent']:
+        return {
+            'can_calculate': False,
+            'message': '此模型類型不支援手動驗算'
+        }
+    
+    # 預處理輸入資料（與預測時相同）
+    if hasattr(model, 'preprocessing_metadata'):
+        preprocessing_metadata = model.preprocessing_metadata
+        categorical_features = preprocessing_metadata.get('categorical_features', [])
+        use_scaling = getattr(model, 'use_scaling', False) if hasattr(model, 'use_scaling') else False
+        scaler = getattr(model, 'scaler', None)
+        encoder = getattr(model, 'encoder', None)
+    else:
+        categorical_features = []
+        use_scaling = False
+        scaler = None
+        encoder = None
+    
+    X_processed, _, _, _ = preprocess_features(
+        input_df,
+        categorical_features=categorical_features,
+        use_scaling=use_scaling,
+        fit=False,
+        scaler=scaler,
+        encoder=encoder
+    )
+    
+    # 確保特徵順序與訓練時一致
+    if model.feature_names is not None:
+        X_processed = X_processed[model.feature_names]
+    
+    # 獲取係數和截距
+    is_multi_output = model_info.get('is_multi_output', False)
+    
+    if is_multi_output:
+        coefficients_list = model_info.get('coefficients', [])
+        intercepts_list = model_info.get('intercepts', [])
+        target_names = model_info.get('target_names', [])
+        
+        if target_name is None:
+            target_name = target_names[0] if target_names else None
+        
+        if target_name and target_name in target_names:
+            target_idx = target_names.index(target_name)
+            coefficients = coefficients_list[target_idx] if target_idx < len(coefficients_list) else []
+            intercept = intercepts_list[target_idx] if target_idx < len(intercepts_list) else 0
+        else:
+            return {
+                'can_calculate': False,
+                'message': f'找不到目標變數：{target_name}'
+            }
+    else:
+        coefficients = model_info.get('coefficients', [])
+        intercept = model_info.get('intercept', 0)
+        target_name = model_info.get('target_names', [None])[0]
+    
+    # 手動計算預測值
+    feature_values = X_processed.iloc[0].values
+    manual_prediction = intercept + np.dot(coefficients, feature_values)
+    
+    # 建立驗算過程
+    calculation_steps = []
+    calculation_steps.append(f"**截距** = {intercept:.6f}")
+    
+    for i, (feature_name, feature_value) in enumerate(zip(model.feature_names, feature_values)):
+        coef = coefficients[i] if i < len(coefficients) else 0
+        product = coef * feature_value
+        calculation_steps.append(f"**{feature_name}** × {coef:.6f} = {feature_value:.6f} × {coef:.6f} = {product:.6f}")
+    
+    calculation_steps.append(f"**總和** = {manual_prediction:.6f}")
+    
+    return {
+        'can_calculate': True,
+        'target_name': target_name,
+        'intercept': intercept,
+        'coefficients': coefficients,
+        'feature_names': model.feature_names,
+        'feature_values': feature_values.tolist(),
+        'manual_prediction': manual_prediction,
+        'calculation_steps': calculation_steps
+    }
 
 
 st.title("🔮 模型預測")
@@ -324,6 +425,21 @@ if prediction_mode == "單筆資料預測":
         submitted = st.form_submit_button("執行預測", use_container_width=True)
         
         if submitted:
+            # 清除舊的預測結果（修復刷新問題）
+            if 'prediction_result' in st.session_state:
+                del st.session_state['prediction_result']
+            if 'prediction_error' in st.session_state:
+                del st.session_state['prediction_error']
+            if 'prediction_warning' in st.session_state:
+                del st.session_state['prediction_warning']
+            if 'prediction_calculation' in st.session_state:
+                del st.session_state['prediction_calculation']
+            
+            # 清除所有驗算相關的 session state
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith('calc_')]
+            for key in keys_to_remove:
+                del st.session_state[key]
+            
             # 將輸入資料轉換為 DataFrame
             input_df = pd.DataFrame([input_data])
             
@@ -388,7 +504,51 @@ if prediction_mode == "單筆資料預測":
         
         # 顯示預測值
         st.markdown("#### 預測值")
+        
+        # 顯示預測值表格
         st.dataframe(result['predictions'], use_container_width=True)
+        
+        # 為每個預測值添加驗算功能
+        for target_col in result['predictions'].columns:
+            pred_value = result['predictions'][target_col].iloc[0]
+            
+            # 使用 expander 顯示驗算過程（預設展開）
+            with st.expander(f"🔍 {target_col} 驗算過程（點擊展開/收起）", expanded=False):
+                try:
+                    calc_result = calculate_manual_prediction(model, result['input_df'], target_col)
+                    
+                    if calc_result.get('can_calculate', False):
+                        st.markdown("##### 📐 計算公式")
+                        st.code(f"預測值 = 截距 + Σ(係數 × 特徵值)")
+                        
+                        st.markdown("##### 📊 計算步驟")
+                        for step in calc_result['calculation_steps']:
+                            st.markdown(step)
+                        
+                        st.markdown("##### ✅ 驗證")
+                        model_pred = pred_value
+                        manual_pred = calc_result['manual_prediction']
+                        diff = abs(model_pred - manual_pred)
+                        
+                        col_a, col_b, col_c = st.columns(3)
+                        with col_a:
+                            st.metric("模型預測值", f"{model_pred:.6f}")
+                        with col_b:
+                            st.metric("手動計算值", f"{manual_pred:.6f}")
+                        with col_c:
+                            st.metric("差異", f"{diff:.10f}")
+                        
+                        if diff < 1e-6:
+                            st.success("✅ 驗算通過！模型預測值與手動計算值一致。")
+                        else:
+                            st.warning(f"⚠️ 差異較大（{diff:.10f}），可能由於數值精度或模型實現差異。")
+                    else:
+                        st.info(f"ℹ️ {calc_result.get('message', '無法進行驗算')}")
+                except Exception as e:
+                    st.error(f"❌ 驗算過程出錯：{str(e)}")
+                    import traceback
+                    with st.expander("查看詳細錯誤資訊"):
+                        st.code(traceback.format_exc())
         
         # 提供下載功能
         csv = result['result_df'].to_csv(index=False).encode('utf-8-sig')

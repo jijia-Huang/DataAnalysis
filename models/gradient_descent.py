@@ -279,6 +279,17 @@ class GradientDescentModel(BaseModel):
             encoder=self.encoder
         )
         
+        # 確保特徵順序與訓練時一致（這很重要！）
+        # 如果欄位順序不一致，模型的係數會對應到錯誤的特徵，導致預測結果錯誤
+        if self.feature_names is not None:
+            # 檢查是否有缺失的特徵
+            missing_features = [f for f in self.feature_names if f not in X_processed.columns]
+            if missing_features:
+                raise ValueError(f"預測資料缺少以下特徵：{missing_features}")
+            
+            # 按照訓練時的特徵順序重新排列
+            X_processed = X_processed[self.feature_names]
+        
         if self.is_multi_output:
             predictions = self.multi_output_model.predict(X_processed.values)
         else:
