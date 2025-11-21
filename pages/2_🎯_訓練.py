@@ -383,7 +383,7 @@ if split_data:
         n_repeats = st.number_input(
             "重複次數",
             min_value=3,
-            max_value=20,
+            max_value=200,
             value=5,
             step=1,
             help="重複評估的次數。次數越多，結果越穩定，但需要更長的時間"

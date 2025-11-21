@@ -83,8 +83,8 @@ def repeated_random_split_evaluate(
     Returns:
         Tuple: (平均值字典, 標準差字典, 每次評估結果列表)
     """
-    if n_repeats < 3 or n_repeats > 20:
-        raise ValueError(f"重複次數必須在 3 到 20 之間，當前值：{n_repeats}")
+    if n_repeats < 3 or n_repeats > 200:
+        raise ValueError(f"重複次數必須在 3 到 200 之間，當前值：{n_repeats}")
     
     if test_size <= 0 or test_size >= 1:
         raise ValueError(f"測試集比例必須在 0 到 1 之間，當前值：{test_size}")
